@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  /* D1 — Primary */
+  --color-bg: #FFFFFF;
+  --color-surface: #F8F7F4;
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #6B6B6B;
+  --color-border: #E8E6E1;
+
+  /* D1 — Accent */
+  --color-accent: #2D7A6F;
+  --color-accent-hover: #246358;
+  --color-accent-light: #E8F2F0;
+
+  /* D1 — Semantic (muted) */
+  --color-success: #4A7C59;
+  --color-success-light: #E8F0EA;
+  --color-warning: #B8860B;
+  --color-warning-light: #F5F0E6;
+  --color-error: #B85450;
+  --color-error-light: #F8EEED;
+  --color-info: #4A6FA5;
+  --color-info-light: #EBF0F6;
+
+  /* D2 — Font family */
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* D2 — Type scale (font-size) */
+  --text-display: 48px;
+  --text-h1: 36px;
+  --text-h2: 28px;
+  --text-h3: 22px;
+  --text-h4: 18px;
+  --text-body-lg: 17px;
+  --text-body: 15px;
+  --text-body-sm: 13px;
+  --text-caption: 12px;
+
+  /* D2 — Font weights */
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* D2 — Line heights */
+  --leading-heading: 1.2;
+  --leading-body: 1.6;
+  --leading-caption: 1.4;
+
+  /* D2 — Letter spacing */
+  --tracking-heading: -0.02em;
+  --tracking-uppercase: 0.08em;
+  --tracking-body: 0;
+
+  /* D3 — Component tokens (convenience) */
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --shadow-card: 0 1px 3px rgba(26, 26, 26, 0.06);
+  --shadow-card-raised: 0 2px 8px rgba(26, 26, 26, 0.08);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}

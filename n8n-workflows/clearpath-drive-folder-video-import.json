@@ -1,0 +1,183 @@
+{
+  "name": "ClearPath — Drive folder → video library",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerOn": "fileCreated",
+        "folderId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 1,
+              "unit": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "trigger",
+      "name": "Watch folder",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "=http://localhost:3000/api/videos/resolve-folder?folderId={{ $json.parents && $json.parents[0] ? $json.parents[0] : '' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "resolve",
+      "name": "Resolve folder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "clearpath-secret",
+          "name": "ClearPath secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.body?.workspaceId }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-ok",
+      "name": "Folder in app?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Watch folder').item.json.id }}",
+          "mode": "id"
+        },
+        "binaryPropertyName": "data"
+      },
+      "id": "download",
+      "name": "Download",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [860, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive",
+          "name": "Google Drive"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "convert",
+        "outputFormat": "mp4",
+        "inputBinaryData": true,
+        "inputBinaryPropertyName": "data"
+      },
+      "id": "convert",
+      "name": "Convert to MP4",
+      "type": "@cloudconvert/n8n-nodes-cloudconvert.cloudConvert",
+      "typeVersion": 1,
+      "position": [970, 300],
+      "credentials": {
+        "cloudConvertApi": {
+          "id": "cloudconvert",
+          "name": "CloudConvert"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "uploadParameter": "file",
+        "binaryPropertyName": "data",
+        "options": { "resource_type": "video" }
+      },
+      "id": "upload",
+      "name": "Upload",
+      "type": "n8n-nodes-base.cloudinary",
+      "typeVersion": 1,
+      "position": [1190, 300],
+      "credentials": {
+        "cloudinaryApi": {
+          "id": "cloudinary",
+          "name": "Cloudinary"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/videos/from-n8n",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"workspaceId\": \"{{ $('Resolve folder').item.json.body.workspaceId }}\",\n  \"coachId\": \"{{ $('Resolve folder').item.json.body.coachId }}\",\n  \"title\": \"{{ ($('Watch folder').item.json.name || 'video').replace(/\\.(mp4|mov|webm|mkv|avi)$/i, '') }}\",\n  \"playbackUrl\": \"{{ $json.secure_url }}\",\n  \"thumbnailUrl\": \"{{ $json.secure_url ? $json.secure_url.replace('/upload/', '/upload/so_0/') : '' }}\",\n  \"durationSeconds\": {{ $json.duration || 'null' }},\n  \"fileSizeBytes\": {{ $json.bytes || 'null' }}\n}"
+      },
+      "id": "create",
+      "name": "Add to site",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1410, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "clearpath-secret",
+          "name": "ClearPath secret"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Watch folder": {
+      "main": [[{ "node": "Resolve folder", "type": "main", "index": 0 }]]
+    },
+    "Resolve folder": {
+      "main": [[{ "node": "Folder in app?", "type": "main", "index": 0 }]]
+    },
+    "Folder in app?": {
+      "main": [[{ "node": "Download", "type": "main", "index": 0 }]]
+    },
+    "Download": {
+      "main": [[{ "node": "Convert to MP4", "type": "main", "index": 0 }]]
+    },
+    "Convert to MP4": {
+      "main": [[{ "node": "Upload", "type": "main", "index": 0 }]]
+    },
+    "Upload": {
+      "main": [[{ "node": "Add to site", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": false },
+  "settings": { "executionOrder": "v1" }
+}
