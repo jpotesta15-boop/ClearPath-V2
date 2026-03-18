@@ -1,9 +1,18 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { z } from 'zod'
 
+export const dynamic = 'force-dynamic'
+
 const patchBodySchema = z.object({
-  folderId: z.string().trim().min(1).nullable(),
+  folderId: z
+    .union([z.string(), z.null()])
+    .transform((v) => {
+      if (v == null) return null
+      const s = String(v).trim()
+      return s === '' ? null : s
+    }),
 })
 
 /**
@@ -17,16 +26,20 @@ export async function GET() {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const { data: coach } = await supabase
+
+    const service = createServiceClient()
+    const { data: coach } = await service
       .from('coaches')
       .select('workspace_id')
       .eq('user_id', user.id)
       .maybeSingle()
     if (!coach?.workspace_id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json(
+        { error: 'No coach workspace found — finish onboarding first' },
+        { status: 403 }
+      )
     }
-
-    const { data: workspace, error } = await supabase
+    const { data: workspace, error } = await service
       .from('workspaces')
       .select('google_drive_import_folder_id')
       .eq('id', coach.workspace_id)
@@ -38,7 +51,14 @@ export async function GET() {
     return NextResponse.json({
       folderId: workspace?.google_drive_import_folder_id ?? null,
     })
-  } catch {
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    if (msg.includes('SUPABASE_SERVICE_ROLE_KEY') || msg.includes('service_role')) {
+      return NextResponse.json(
+        { error: 'Server missing SUPABASE_SERVICE_ROLE_KEY — add it to .env.local and restart dev' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json(
       { error: 'Something went wrong — check your connection and try again' },
       { status: 500 }
@@ -57,13 +77,18 @@ export async function PATCH(request: Request) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const { data: coach } = await supabase
+
+    const service = createServiceClient()
+    const { data: coach } = await service
       .from('coaches')
       .select('workspace_id')
       .eq('user_id', user.id)
       .maybeSingle()
     if (!coach?.workspace_id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json(
+        { error: 'No coach workspace found — finish onboarding first' },
+        { status: 403 }
+      )
     }
 
     const body = await request.json()
@@ -73,12 +98,14 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: msg }, { status: 400 })
     }
 
-    const { error } = await supabase
+    const { data: updated, error } = await service
       .from('workspaces')
       .update({
         google_drive_import_folder_id: parsed.data.folderId,
       })
       .eq('id', coach.workspace_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       return NextResponse.json(
@@ -86,8 +113,21 @@ export async function PATCH(request: Request) {
         { status: 500 }
       )
     }
+    if (!updated) {
+      return NextResponse.json(
+        { error: 'Workspace not found — contact support' },
+        { status: 404 }
+      )
+    }
     return NextResponse.json({ data: 'ok' })
-  } catch {
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    if (msg.includes('SUPABASE_SERVICE_ROLE_KEY') || msg.includes('service_role')) {
+      return NextResponse.json(
+        { error: 'Server missing SUPABASE_SERVICE_ROLE_KEY — add it to .env.local and restart dev' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json(
       { error: 'Something went wrong — check your connection and try again' },
       { status: 500 }

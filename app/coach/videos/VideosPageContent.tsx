@@ -30,9 +30,12 @@ export function VideosPageContent() {
   }, [])
 
   const fetchFolderId = useCallback(async () => {
-    const res = await fetch('/api/workspaces/import-folder')
+    const res = await fetch('/api/workspaces/import-folder', {
+      credentials: 'include',
+      cache: 'no-store',
+    })
     const data = await res.json()
-    if (res.ok && data.folderId != null) setFolderId(data.folderId ?? '')
+    if (res.ok) setFolderId(data.folderId ?? '')
   }, [])
 
   useEffect(() => {
@@ -93,6 +96,8 @@ export function VideosPageContent() {
       const res = await fetch('/api/workspaces/import-folder', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        cache: 'no-store',
         body: JSON.stringify({ folderId: folderId.trim() || null }),
       })
       const data = await res.json().catch(() => ({}))
