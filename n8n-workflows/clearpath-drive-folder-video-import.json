@@ -58,7 +58,7 @@
           "conditions": [
             {
               "id": "ok",
-              "leftValue": "={{ $json.body?.workspaceId }}",
+              "leftValue": "={{ $json.body?.workspaceId || $json.workspaceId || '' }}",
               "rightValue": "",
               "operator": { "type": "string", "operation": "notEmpty" }
             }

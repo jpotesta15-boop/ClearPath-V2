@@ -103,3 +103,5 @@ The **Resolve folder** node tells ClearPath which workspace and coach the new fi
 3. Within a few minutes (depending on poll interval), the workflow should run and the video should appear in your ClearPath Videos library.
 
 If the folder isn’t registered in the app, **Resolve folder** returns 404 and the workflow stops without creating a video (no error needed).
+
+**"Folder in app?" goes to false:** Run the workflow and check the **Resolve folder** node output. If statusCode is 404/400, the folderId in the URL doesn't match the app — use the exact same ID as on the Videos page. If statusCode is 200 but the IF still fails, the workflow now checks both `body.workspaceId` and `workspaceId`. You can also set the Resolve URL to a fixed value: `https://YOUR-APP-URL/api/videos/resolve-folder?folderId=YOUR_FOLDER_ID_HERE` (same ID as in the app).

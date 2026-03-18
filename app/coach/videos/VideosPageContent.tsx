@@ -18,6 +18,7 @@ export function VideosPageContent() {
   const [addToProgramVideo, setAddToProgramVideo] = useState<Video | null>(null)
   const [folderId, setFolderId] = useState('')
   const [folderIdSaving, setFolderIdSaving] = useState(false)
+  const [folderIdSaved, setFolderIdSaved] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   const router = useRouter()
 
@@ -87,13 +88,22 @@ export function VideosPageContent() {
 
   const saveFolderId = async () => {
     setFolderIdSaving(true)
+    setFolderIdSaved(false)
     try {
       const res = await fetch('/api/workspaces/import-folder', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ folderId: folderId.trim() || null }),
       })
-      if (res.ok) setToast('Import folder saved')
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setToast('Import folder saved')
+        setFolderIdSaved(true)
+        fetchFolderId() // refetch so input shows what's stored
+        setTimeout(() => setFolderIdSaved(false), 3000)
+      } else {
+        setToast(data?.error ?? 'Could not save — try again')
+      }
     } catch {
       setToast('Could not save — try again')
     } finally {
@@ -135,16 +145,19 @@ export function VideosPageContent() {
           <p className="text-xs text-[var(--color-muted)] mb-2">
             Create a folder in Google Drive, open it, and copy the ID from the URL (e.g. <code className="bg-[var(--color-border)] px-1 rounded">drive.google.com/drive/folders/THIS_IS_THE_ID</code>).
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
               value={folderId}
               onChange={(e) => setFolderId(e.target.value)}
               placeholder="Paste folder ID"
-              className="flex-1"
+              className="flex-1 min-w-0"
             />
             <Button onClick={saveFolderId} disabled={folderIdSaving}>
               {folderIdSaving ? 'Saving…' : 'Save'}
             </Button>
+            {folderIdSaved && (
+              <span className="text-sm font-medium text-[var(--color-success)]">Saved</span>
+            )}
           </div>
           {folderId.trim() && (
             <p className="mt-2 text-xs text-[var(--color-muted)]">
