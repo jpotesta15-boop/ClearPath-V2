@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
@@ -400,18 +400,50 @@ function VideoCard({
   onAddToProgram: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const previewRef = useRef<HTMLVideoElement | null>(null)
   const isReady = video.processing_status === 'ready'
   const isFailed = video.processing_status === 'failed'
   const isProcessing = video.processing_status === 'processing' || video.processing_status === 'queued'
 
+  const startPreview = async () => {
+    const el = previewRef.current
+    if (!el) return
+    try {
+      await el.play()
+    } catch {
+      // Ignore autoplay restrictions on some browsers.
+    }
+  }
+
+  const stopPreview = () => {
+    const el = previewRef.current
+    if (!el) return
+    el.pause()
+    el.currentTime = 0
+  }
+
   return (
     <Card className="overflow-hidden p-0">
-      <div className="relative aspect-video bg-[var(--color-border)]">
+      <div
+        className="relative aspect-video bg-[var(--color-border)]"
+        onMouseEnter={startPreview}
+        onMouseLeave={stopPreview}
+      >
         {video.thumbnail_url ? (
           <img
             src={video.thumbnail_url}
             alt=""
             className="h-full w-full object-cover"
+          />
+        ) : isReady && video.playback_url ? (
+          <video
+            ref={previewRef}
+            src={video.playback_url}
+            className="h-full w-full object-cover"
+            muted
+            playsInline
+            preload="metadata"
+            loop
           />
         ) : (
           <div className="h-full w-full flex items-center justify-center">

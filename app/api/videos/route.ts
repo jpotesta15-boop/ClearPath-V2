@@ -1,7 +1,38 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
+import { createServiceClient } from '@/lib/supabase/service'
+import { finalizeFromCloudConvertJobId } from '@/lib/drive-import/cloudconvert-finalize'
 
 const STATUS_VALUES = ['ready', 'processing', 'failed', 'queued'] as const
+const FALLBACK_PROCESSING_AGE_MS = 90 * 1000
+const FALLBACK_BATCH_SIZE = 3
+
+async function runProcessingFallback(workspaceId: string) {
+  const supabase = createServiceClient()
+  const cutoffIso = new Date(Date.now() - FALLBACK_PROCESSING_AGE_MS).toISOString()
+  const { data: staleRows } = await supabase
+    .from('videos')
+    .select('id, n8n_execution_id')
+    .eq('workspace_id', workspaceId)
+    .is('deleted_at', null)
+    .in('processing_status', ['processing', 'queued'])
+    .not('n8n_execution_id', 'is', null)
+    .lt('created_at', cutoffIso)
+    .order('created_at', { ascending: true })
+    .limit(FALLBACK_BATCH_SIZE)
+
+  if (!staleRows?.length) return
+
+  for (const row of staleRows) {
+    const jobId = (row.n8n_execution_id ?? '').trim()
+    if (!jobId) continue
+    await finalizeFromCloudConvertJobId({
+      supabase,
+      videoId: row.id as string,
+      jobId,
+    })
+  }
+}
 
 export async function GET(request: Request) {
   try {
@@ -21,6 +52,10 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')?.trim()
+
+    // Safety net: if a webhook is missed, finalize a few stale processing items
+    // while the coach is actively loading the library.
+    await runProcessingFallback(coach.workspace_id).catch(() => {})
 
     let query = supabase
       .from('videos')

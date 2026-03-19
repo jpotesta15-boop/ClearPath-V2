@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/service'
-import { uploadMp4FromUrl } from '@/lib/drive-import/supabase-video-storage'
+import { fetchCloudConvertJob, finalizeFromCloudConvertJobId } from '@/lib/drive-import/cloudconvert-finalize'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -33,22 +33,6 @@ type CcJobData = {
   tag?: string
   status?: string
   tasks?: CcTask[]
-}
-
-async function fetchCloudConvertJob(jobId: string): Promise<CcJobData | null> {
-  const key = process.env.CLOUDCONVERT_API_KEY
-  if (!key) return null
-  const res = await fetch(`https://api.cloudconvert.com/v2/jobs/${jobId}`, {
-    headers: { Authorization: `Bearer ${key}` },
-  })
-  if (!res.ok) return null
-  const json = (await res.json()) as { data?: CcJobData }
-  return json.data ?? null
-}
-
-function exportUrlFromTasks(tasks: CcTask[] | undefined): string | null {
-  const exportTask = tasks?.find((t) => t.operation === 'export/url' && t.status === 'finished')
-  return exportTask?.result?.files?.[0]?.url ?? null
 }
 
 /**
@@ -119,57 +103,16 @@ export async function POST(request: Request) {
   if (event !== 'job.finished') {
     return NextResponse.json({ ok: true })
   }
-
-  const mp4Url = exportUrlFromTasks(job.tasks)
-  if (!mp4Url) {
-    await supabase
-      .from('videos')
-      .update({
-        processing_status: 'failed',
-        processing_error: 'No export URL from CloudConvert',
-      })
-      .eq('id', tag)
-      .eq('processing_status', 'processing')
-    return NextResponse.json({ ok: true })
+  if (!job.id || typeof job.id !== 'string') {
+    return NextResponse.json({ error: 'Missing CloudConvert job id' }, { status: 400 })
   }
-
-  const { data: row } = await supabase
-    .from('videos')
-    .select('id, processing_status')
-    .eq('id', tag)
-    .maybeSingle()
-
-  if (!row || row.processing_status !== 'processing') {
-    return NextResponse.json({ ok: true })
+  const result = await finalizeFromCloudConvertJobId({
+    supabase,
+    videoId: tag,
+    jobId: job.id,
+  })
+  if (result.state === 'failed') {
+    return NextResponse.json({ error: result.message ?? 'Finalize failed' }, { status: 500 })
   }
-
-  const storagePath = `imports/${tag}.mp4`
-
-  try {
-    const up = await uploadMp4FromUrl(supabase, mp4Url, storagePath)
-
-    const now = new Date().toISOString()
-    await supabase
-      .from('videos')
-      .update({
-        processing_status: 'ready',
-        processed_at: now,
-        url: up.publicUrl,
-        playback_url: up.publicUrl,
-        thumbnail_url: null,
-        duration_seconds: null,
-        file_size_bytes: up.bytes ?? null,
-        processing_error: null,
-      })
-      .eq('id', tag)
-
-    return NextResponse.json({ ok: true })
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Supabase Storage upload failed'
-    await supabase
-      .from('videos')
-      .update({ processing_status: 'failed', processing_error: msg })
-      .eq('id', tag)
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
+  return NextResponse.json({ ok: true, state: result.state })
 }
