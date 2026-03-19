@@ -2,10 +2,39 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { finalizeFromCloudConvertJobId } from '@/lib/drive-import/cloudconvert-finalize'
+import { getVideoStorageBucket } from '@/lib/drive-import/supabase-video-storage'
 
 const STATUS_VALUES = ['ready', 'processing', 'failed', 'queued'] as const
 const FALLBACK_PROCESSING_AGE_MS = 90 * 1000
 const FALLBACK_BATCH_SIZE = 3
+
+async function markReadyIfStorageFileExists(supabase: ReturnType<typeof createServiceClient>, videoId: string) {
+  const bucket = getVideoStorageBucket()
+  const folder = 'imports'
+  const filename = `${videoId}.mp4`
+  const { data: files, error } = await supabase.storage.from(bucket).list(folder, {
+    limit: 1,
+    search: filename,
+  })
+  if (error || !files?.some((f) => f.name === filename)) return false
+
+  const path = `${folder}/${filename}`
+  const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path)
+  await supabase
+    .from('videos')
+    .update({
+      processing_status: 'ready',
+      processed_at: new Date().toISOString(),
+      url: pub.publicUrl,
+      playback_url: pub.publicUrl,
+      storage_provider: 'supabase',
+      processing_error: null,
+    })
+    .eq('id', videoId)
+    .in('processing_status', ['processing', 'queued'])
+
+  return true
+}
 
 async function runProcessingFallback(workspaceId: string) {
   const supabase = createServiceClient()
@@ -24,13 +53,20 @@ async function runProcessingFallback(workspaceId: string) {
   if (!staleRows?.length) return
 
   for (const row of staleRows) {
+    const videoId = row.id as string
     const jobId = (row.n8n_execution_id ?? '').trim()
-    if (!jobId) continue
-    await finalizeFromCloudConvertJobId({
+    if (!jobId) {
+      await markReadyIfStorageFileExists(supabase, videoId)
+      continue
+    }
+    const result = await finalizeFromCloudConvertJobId({
       supabase,
-      videoId: row.id as string,
+      videoId,
       jobId,
     })
+    if (result.state !== 'ready') {
+      await markReadyIfStorageFileExists(supabase, videoId)
+    }
   }
 }
 

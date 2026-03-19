@@ -1,0 +1,508 @@
+{
+  "name": "ClearPath Drive Import Reliable (Poll + Finalize)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Required workflow variables\n- CLEARPATH_APP_URL = https://clear-path-v2-dcb0rs7n4-jpotesta15-boops-projects.vercel.app\n- CLEARPATH_N8N_SECRET = same as Vercel N8N_CALLBACK_SECRET\n- VERCEL_AUTOMATION_BYPASS_SECRET = same as Vercel bypass secret\n- CLOUDCONVERT_API_KEY = your CloudConvert API key\n\nFlow:\nDrive trigger -> start import -> poll CloudConvert -> finalize via app webhook.",
+        "height": 300,
+        "width": 430,
+        "color": 4
+      },
+      "id": "note-setup",
+      "name": "SETUP",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "1rzb1vSwbls5eGh3H3MVR5YGkv9ExDA7j",
+          "mode": "id",
+          "cachedResultName": "ClearPath import folder",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1rzb1vSwbls5eGh3H3MVR5YGkv9ExDA7j"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "node-watch",
+      "name": "1 - Watch Drive folder",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        360,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.mimeType || '' }}",
+              "rightValue": "video/",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.name || '').toLowerCase() }}",
+              "rightValue": ".mp4",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.name || '').toLowerCase() }}",
+              "rightValue": ".mov",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.name || '').toLowerCase() }}",
+              "rightValue": ".webm",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.name || '').toLowerCase() }}",
+              "rightValue": ".mkv",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.name || '').toLowerCase() }}",
+              "rightValue": ".avi",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.name || '').toLowerCase() }}",
+              "rightValue": ".m4v",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "node-if-video",
+      "name": "2 - Only videos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        620,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($vars.CLEARPATH_APP_URL || '').replace(/\\/+$/, '') + '/api/videos/import-from-drive?x-vercel-protection-bypass=' + encodeURIComponent(String($vars.VERCEL_AUTOMATION_BYPASS_SECRET || '')) }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-clearpath-secret",
+              "value": "={{ $vars.CLEARPATH_N8N_SECRET }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ folderId: ($json.parents && $json.parents[0]) ? $json.parents[0] : '1rzb1vSwbls5eGh3H3MVR5YGkv9ExDA7j', driveFileId: $json.id, driveFileName: $json.name || 'video.mp4' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "node-start-import",
+      "name": "3 - Start import",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "value": "={{ $json.data.cloudconvertJobId }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "videoId",
+              "value": "={{ $json.data.videoId }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "attempt",
+              "value": 0,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-set-job",
+      "name": "4 - Save job id",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1120,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 20,
+        "unit": "seconds"
+      },
+      "id": "node-wait",
+      "name": "5 - Wait 20s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1360,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.cloudconvert.com/v2/jobs/{{$json.jobId}}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$vars.CLOUDCONVERT_API_KEY}}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "node-poll-job",
+      "name": "6 - Poll CloudConvert job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1580,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.data.status }}",
+              "rightValue": "finished",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-finished",
+      "name": "7 - Finished?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1800,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "jobId",
+              "value": "={{ $json.data.id }}",
+              "type": "string"
+            },
+            {
+              "id": "b2",
+              "name": "attempt",
+              "value": "={{ Number($json.attempt || 0) + 1 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-inc-attempt",
+      "name": "8 - Increment attempt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2010,
+        410
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.attempt }}",
+              "rightValue": 30,
+              "operator": {
+                "type": "number",
+                "operation": "smaller"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-retry",
+      "name": "9 - Under max attempts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2230,
+        410
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($vars.CLEARPATH_APP_URL || '').replace(/\\/+$/, '') + '/api/webhooks/cloudconvert?x-vercel-protection-bypass=' + encodeURIComponent(String($vars.VERCEL_AUTOMATION_BYPASS_SECRET || '')) }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ job: { id: $json.data.id || $json.jobId } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "node-finalize",
+      "name": "10 - Finalize in app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2020,
+        230
+      ]
+    }
+  ],
+  "connections": {
+    "1 - Watch Drive folder": {
+      "main": [
+        [
+          {
+            "node": "2 - Only videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2 - Only videos": {
+      "main": [
+        [
+          {
+            "node": "3 - Start import",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "3 - Start import": {
+      "main": [
+        [
+          {
+            "node": "4 - Save job id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4 - Save job id": {
+      "main": [
+        [
+          {
+            "node": "5 - Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5 - Wait 20s": {
+      "main": [
+        [
+          {
+            "node": "6 - Poll CloudConvert job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6 - Poll CloudConvert job": {
+      "main": [
+        [
+          {
+            "node": "7 - Finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7 - Finished?": {
+      "main": [
+        [
+          {
+            "node": "10 - Finalize in app",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "8 - Increment attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8 - Increment attempt": {
+      "main": [
+        [
+          {
+            "node": "9 - Under max attempts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "9 - Under max attempts?": {
+      "main": [
+        [
+          {
+            "node": "5 - Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
