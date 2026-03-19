@@ -1,0 +1,65 @@
+{
+  "name": "ClearPath — Drive URL → MP4 → Cloudinary → App (no binary in n8n)",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerOn": "fileCreated",
+        "folderId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 1,
+              "unit": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "t1",
+      "name": "Watch folder",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\r\n * Paste into n8n Code node OR used by build script for clearpath-drive-url-cloudconvert-import.json\r\n * Requires n8n env vars (Settings → Variables).\r\n */\r\nconst file = $input.first().json;\r\nconst id = file.id;\r\nconst name = (file.name || 'video.mp4').trim();\r\nconst folderId = file.parents && file.parents[0] ? String(file.parents[0]).trim() : '';\r\nconst mime = file.mimeType || '';\r\n\r\nif (\r\n  !mime.startsWith('video/') &&\r\n  !/\\.(mp4|mov|webm|mkv|avi|m4v|mpeg|mpg)$/i.test(name)\r\n) {\r\n  return [{ json: { skipped: true, reason: 'not a video file' } }];\r\n}\r\n\r\nconst clientId = $env.GOOGLE_CLIENT_ID;\r\nconst clientSecret = $env.GOOGLE_CLIENT_SECRET;\r\nconst refreshToken = $env.GOOGLE_DRIVE_REFRESH_TOKEN;\r\nconst ccKey = $env.CLOUDCONVERT_API_KEY;\r\nconst cloudName = $env.CLOUDINARY_CLOUD_NAME;\r\nconst uploadPreset = $env.CLOUDINARY_UPLOAD_PRESET;\r\nconst appUrl = String($env.CLEARPATH_APP_URL || 'http://localhost:3000').replace(/\\/$/, '');\r\nconst cbSecret = $env.N8N_CALLBACK_SECRET;\r\n\r\nif (!id || !clientId || !clientSecret || !refreshToken || !ccKey || !cloudName || !uploadPreset || !cbSecret) {\r\n  throw new Error(\r\n    'Set n8n variables: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN, CLOUDCONVERT_API_KEY, CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET, N8N_CALLBACK_SECRET, CLEARPATH_APP_URL'\r\n  );\r\n}\r\n\r\nconst tokenRes = await this.helpers.httpRequest({\r\n  method: 'POST',\r\n  url: 'https://oauth2.googleapis.com/token',\r\n  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\r\n  body:\r\n    'grant_type=refresh_token&refresh_token=' +\r\n    encodeURIComponent(refreshToken) +\r\n    '&client_id=' +\r\n    encodeURIComponent(clientId) +\r\n    '&client_secret=' +\r\n    encodeURIComponent(clientSecret),\r\n  json: true,\r\n});\r\nif (!tokenRes.access_token) throw new Error('Google token: ' + JSON.stringify(tokenRes));\r\n\r\nconst safeName = name.replace(/[^\\w.\\-()+ ]/g, '_').substring(0, 200) || 'video.mp4';\r\nconst jobRes = await this.helpers.httpRequest({\r\n  method: 'POST',\r\n  url: 'https://sync.api.cloudconvert.com/v2/jobs',\r\n  headers: { Authorization: 'Bearer ' + ccKey, 'Content-Type': 'application/json' },\r\n  body: {\r\n    tasks: {\r\n      import_drive: {\r\n        operation: 'import/url',\r\n        url: 'https://www.googleapis.com/drive/v3/files/' + id + '?alt=media',\r\n        filename: safeName,\r\n        headers: { Authorization: 'Bearer ' + tokenRes.access_token },\r\n      },\r\n      to_mp4: { operation: 'convert', input: 'import_drive', output_format: 'mp4' },\r\n      out_url: { operation: 'export/url', input: 'to_mp4' },\r\n    },\r\n  },\r\n  json: true,\r\n});\r\n\r\nconst tasks = jobRes.data?.tasks || [];\r\nconst ex = tasks.find((t) => t.operation === 'export/url' && t.status === 'finished');\r\nconst mp4 = ex?.result?.files?.[0]?.url;\r\nif (!mp4) throw new Error('CloudConvert failed: ' + (jobRes.data?.status || JSON.stringify(tasks)));\r\n\r\nconst cRes = await this.helpers.httpRequest({\r\n  method: 'POST',\r\n  url: 'https://api.cloudinary.com/v1_1/' + cloudName + '/video/upload',\r\n  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\r\n  body: 'file=' + encodeURIComponent(mp4) + '&upload_preset=' + encodeURIComponent(uploadPreset),\r\n  json: true,\r\n});\r\nif (!cRes.secure_url) throw new Error('Cloudinary: ' + JSON.stringify(cRes));\r\n\r\nconst resolve = await this.helpers.httpRequest({\r\n  method: 'GET',\r\n  url: appUrl + '/api/videos/resolve-folder?folderId=' + encodeURIComponent(folderId),\r\n  headers: { 'X-Clearpath-Secret': cbSecret },\r\n  json: true,\r\n});\r\nif (!resolve.workspaceId) throw new Error('Folder not registered in ClearPath: ' + folderId);\r\n\r\nconst title = name.replace(/\\.(mp4|mov|webm|mkv|avi|m4v)$/i, '') || 'video';\r\nconst thumb = cRes.secure_url.includes('/upload/')\r\n  ? cRes.secure_url.replace('/upload/', '/upload/so_0/')\r\n  : null;\r\n\r\nconst fin = await this.helpers.httpRequest({\r\n  method: 'POST',\r\n  url: appUrl + '/api/videos/from-n8n',\r\n  headers: { 'Content-Type': 'application/json', 'X-Clearpath-Secret': cbSecret },\r\n  body: {\r\n    workspaceId: resolve.workspaceId,\r\n    coachId: resolve.coachId,\r\n    title,\r\n    playbackUrl: cRes.secure_url,\r\n    thumbnailUrl: thumb,\r\n    durationSeconds: cRes.duration != null ? Math.round(cRes.duration) : null,\r\n    fileSizeBytes: cRes.bytes != null ? cRes.bytes : null,\r\n  },\r\n  json: true,\r\n});\r\n\r\nreturn [{ json: { ok: true, playbackUrl: cRes.secure_url, clearpathResponse: fin } }];\r\n"
+      },
+      "id": "c1",
+      "name": "URL import + CC + Cloudinary + ClearPath",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Watch folder": {
+      "main": [
+        [
+          {
+            "node": "URL import + CC + Cloudinary + ClearPath",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

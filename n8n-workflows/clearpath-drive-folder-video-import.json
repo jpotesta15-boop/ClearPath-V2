@@ -1,183 +1,171 @@
 {
-  "name": "ClearPath — Drive folder → video library",
+  "name": "ClearPath — Drive → library (server import)",
   "nodes": [
     {
       "parameters": {
-        "triggerOn": "fileCreated",
-        "folderId": {
-          "__rl": true,
-          "value": "",
-          "mode": "id"
-        },
-        "pollTimes": {
-          "item": [
-            {
-              "mode": "everyX",
-              "value": 1,
-              "unit": "minutes"
-            }
-          ]
-        }
+        "content": "## Setup (do this first)\n\n### Workflow variables\n**Workflow menu (⋮) → Variables** — add:\n- `CLEARPATH_APP_URL` = your app (no trailing slash)\n- `CLEARPATH_N8N_SECRET` = same as ClearPath **`N8N_CALLBACK_SECRET`**\n- **`VERCEL_AUTOMATION_BYPASS_SECRET`** = same secret as Vercel **Protection Bypass for Automation** (only if Deployment Protection is ON). If protection is off, leave empty or omit.\n\n### Vercel protection bypass\nSet `VERCEL_AUTOMATION_BYPASS_SECRET` in n8n variables. Node **3** appends `?x-vercel-protection-bypass=...` to the POST **URL** (more reliable than headers in n8n). ClearPath does the same for the CloudConvert webhook on Vercel.\n\n### Node \"1 — Watch Drive folder\"\n1. **Google Drive OAuth2** (same account as import folder).\n2. **Folder** → **ID** = same as ClearPath → Videos.\n\n### ClearPath\nVideos → folder ID + **Connect Google Drive**. Vercel env: see `n8n-workflows/README.md`.",
+        "height": 580,
+        "width": 420,
+        "color": 4
       },
-      "id": "trigger",
-      "name": "Watch folder",
-      "type": "n8n-nodes-base.googleDriveTrigger",
-      "typeVersion": 1.1,
-      "position": [200, 300]
+      "id": "note-setup-a",
+      "name": "SETUP — read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-60, 140]
     },
     {
       "parameters": {
-        "url": "=http://localhost:3000/api/videos/resolve-folder?folderId={{ $json.parents && $json.parents[0] ? $json.parents[0] : '' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "options": {
-          "response": {
-            "response": {
-              "fullResponse": true,
-              "neverError": true
-            }
-          }
-        }
+        "authentication": "oAuth2",
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_FOLDER_ID_PASTE_HERE",
+          "mode": "id",
+          "cachedResultName": "ClearPath import folder",
+          "cachedResultUrl": "=https://drive.google.com/drive/folders/YOUR_FOLDER_ID_PASTE_HERE"
+        },
+        "event": "fileCreated",
+        "options": {}
       },
-      "id": "resolve",
-      "name": "Resolve folder",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [420, 300],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "clearpath-secret",
-          "name": "ClearPath secret"
-        }
-      }
+      "id": "node-gdrive-watch",
+      "name": "1 — Watch Drive folder",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [420, 400]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
           "conditions": [
             {
-              "id": "ok",
-              "leftValue": "={{ $json.body?.workspaceId || $json.workspaceId || '' }}",
-              "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty" }
+              "id": "v1",
+              "leftValue": "={{ $json.mimeType || '' }}",
+              "rightValue": "video/",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            },
+            {
+              "id": "v2",
+              "leftValue": "={{ $json.name || '' }}",
+              "rightValue": ".mp4",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "id": "v3",
+              "leftValue": "={{ $json.name || '' }}",
+              "rightValue": ".mov",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "id": "v4",
+              "leftValue": "={{ $json.name || '' }}",
+              "rightValue": ".webm",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
             }
           ],
-          "combinator": "and"
-        }
-      },
-      "id": "if-ok",
-      "name": "Folder in app?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [640, 300]
-    },
-    {
-      "parameters": {
-        "operation": "download",
-        "fileId": {
-          "__rl": true,
-          "value": "={{ $('Watch folder').item.json.id }}",
-          "mode": "id"
+          "combinator": "or"
         },
-        "binaryPropertyName": "data"
+        "options": {}
       },
-      "id": "download",
-      "name": "Download",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [860, 300],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "google-drive",
-          "name": "Google Drive"
-        }
-      }
+      "id": "node-if-video",
+      "name": "2 — Only videos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [680, 400]
     },
     {
       "parameters": {
-        "resource": "file",
-        "operation": "convert",
-        "outputFormat": "mp4",
-        "inputBinaryData": true,
-        "inputBinaryPropertyName": "data"
-      },
-      "id": "convert",
-      "name": "Convert to MP4",
-      "type": "@cloudconvert/n8n-nodes-cloudconvert.cloudConvert",
-      "typeVersion": 1,
-      "position": [970, 300],
-      "credentials": {
-        "cloudConvertApi": {
-          "id": "cloudconvert",
-          "name": "CloudConvert"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "resource": "video",
-        "operation": "upload",
-        "uploadParameter": "file",
-        "binaryPropertyName": "data",
-        "options": { "resource_type": "video" }
-      },
-      "id": "upload",
-      "name": "Upload",
-      "type": "n8n-nodes-base.cloudinary",
-      "typeVersion": 1,
-      "position": [1190, 300],
-      "credentials": {
-        "cloudinaryApi": {
-          "id": "cloudinary",
-          "name": "Cloudinary"
-        }
-      }
-    },
-    {
-      "parameters": {
+        "preBuiltAgentsCalloutHttpRequest": "",
+        "curlImport": "",
         "method": "POST",
-        "url": "http://localhost:3000/api/videos/from-n8n",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ (() => { const b = ($vars.CLEARPATH_APP_URL || '').toString().replace(/\\/+$/,''); const p = b + '/api/videos/import-from-drive'; const s = $vars.VERCEL_AUTOMATION_BYPASS_SECRET; return s ? p + '?x-vercel-protection-bypass=' + encodeURIComponent(String(s)) : p; })() }}",
+        "authentication": "none",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Clearpath-Secret",
+              "value": "={{ $vars.CLEARPATH_N8N_SECRET }}"
+            }
+          ]
+        },
         "sendBody": true,
+        "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={\n  \"workspaceId\": \"{{ $('Resolve folder').item.json.body.workspaceId }}\",\n  \"coachId\": \"{{ $('Resolve folder').item.json.body.coachId }}\",\n  \"title\": \"{{ ($('Watch folder').item.json.name || 'video').replace(/\\.(mp4|mov|webm|mkv|avi)$/i, '') }}\",\n  \"playbackUrl\": \"{{ $json.secure_url }}\",\n  \"thumbnailUrl\": \"{{ $json.secure_url ? $json.secure_url.replace('/upload/', '/upload/so_0/') : '' }}\",\n  \"durationSeconds\": {{ $json.duration || 'null' }},\n  \"fileSizeBytes\": {{ $json.bytes || 'null' }}\n}"
+        "jsonBody": "={{ JSON.stringify({ folderId: ($json.parents && $json.parents[0]) ? $json.parents[0] : '', driveFileId: $json.id, driveFileName: $json.name || 'video.mp4' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 120000
+        }
       },
-      "id": "create",
-      "name": "Add to site",
+      "id": "node-http-import",
+      "name": "3 — POST ClearPath import",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1410, 300],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "clearpath-secret",
-          "name": "ClearPath secret"
-        }
-      }
+      "position": [940, 320]
     }
   ],
   "connections": {
-    "Watch folder": {
-      "main": [[{ "node": "Resolve folder", "type": "main", "index": 0 }]]
+    "1 — Watch Drive folder": {
+      "main": [
+        [
+          {
+            "node": "2 — Only videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Resolve folder": {
-      "main": [[{ "node": "Folder in app?", "type": "main", "index": 0 }]]
-    },
-    "Folder in app?": {
-      "main": [[{ "node": "Download", "type": "main", "index": 0 }]]
-    },
-    "Download": {
-      "main": [[{ "node": "Convert to MP4", "type": "main", "index": 0 }]]
-    },
-    "Convert to MP4": {
-      "main": [[{ "node": "Upload", "type": "main", "index": 0 }]]
-    },
-    "Upload": {
-      "main": [[{ "node": "Add to site", "type": "main", "index": 0 }]]
+    "2 — Only videos": {
+      "main": [
+        [
+          {
+            "node": "3 — POST ClearPath import",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
     }
   },
   "pinData": {},
-  "meta": { "templateCredsSetupCompleted": false },
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
 }

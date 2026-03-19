@@ -1,107 +1,110 @@
-# n8n workflows for ClearPath
+# ClearPath — one simple workflow (2–5 min videos, no download in n8n)
 
-Import these into [n8n](https://n8n.io) to automate video import from Google Drive into your ClearPath video library.
+## What you get
 
----
-
-## ClearPath — Drive folder → video library
-
-**File:** `clearpath-drive-folder-video-import.json`
-
-When a new file is added to a Google Drive folder that you’ve set as your “import folder” in the ClearPath app, this workflow:
-
-1. Resolves the folder ID to your workspace and coach (ClearPath API).
-2. Downloads the file from Drive.
-3. **Converts it to MP4** using CloudConvert.
-4. Uploads the MP4 to Cloudinary (for playback URL).
-5. Creates the video in your ClearPath library via `POST /api/videos/from-n8n`.
-
-Videos then show up on your **Videos** page (and in Realtime if you have the tab open).
-
----
-
-### Before you import
-
-1. **ClearPath app**
-   - In the app, go to **Videos** and set **Google Drive import folder ID** to the folder you’ll upload into (e.g. from `https://drive.google.com/drive/folders/FOLDER_ID` → use `FOLDER_ID`).
-   - Ensure **N8N_CALLBACK_SECRET** is set in the app’s environment (e.g. Vercel / `.env.local`). The workflow will send this in the `X-Clearpath-Secret` header.
-
-2. **n8n**
-   - **Install the CloudConvert community node:** In n8n go to **Settings → Community Nodes → Install** and add `@cloudconvert/n8n-nodes-cloudconvert`. Restart n8n if prompted.
-   - **Google Drive:** Create a “Google Drive” (or “Google Drive OAuth2”) credential in n8n that can see the same folder.
-   - **CloudConvert:** Create a CloudConvert credential in n8n (API key at [cloudconvert.com/dashboard/api/v2/keys](https://cloudconvert.com/dashboard/api/v2/keys), or OAuth2). Free tier includes 25 credits/day.
-   - **Cloudinary:** Create a Cloudinary credential in n8n (hosts the MP4 and gives you the playback URL).
-   - **ClearPath secret:** Create an **HTTP Header Auth** credential in n8n:
-     - Name: e.g. `ClearPath n8n secret`
-     - Header name: `X-Clearpath-Secret`
-     - Header value: the same value as **N8N_CALLBACK_SECRET** in the ClearPath app.
-
-3. **App URL**
-   - The workflow defaults to **`http://localhost:3000`** (for local dev). When you deploy, set n8n env **`CLEARPATH_APP_URL`** to your live URL (e.g. `https://app.clearpath.com`) or the Resolve / Add to site nodes will keep using localhost.
-   - If n8n runs in **Docker** and your app is on the host, use `http://host.docker.internal:3000` (or your host IP) instead of `localhost`.
-
----
-
-### Import and configure
-
-1. In n8n: **Workflows** → **Import from File** → choose `clearpath-drive-folder-video-import.json`.
-2. Open **Watch folder** and set the **Drive folder** to the same folder ID you pasted in the ClearPath Videos page.
-3. In **Resolve folder** and **Add to site**, assign the **HTTP Header Auth** credential (`X-Clearpath-Secret` = `N8N_CALLBACK_SECRET`).
-4. In **Download**, assign your **Google Drive** credential.
-5. In **Convert to MP4**, assign your **CloudConvert** credential (API key or OAuth2).
-6. In **Upload**, assign your **Cloudinary** credential.
-7. Save and **Activate** the workflow.
-
----
-
-### Resolve folder node — setup
-
-The **Resolve folder** node tells ClearPath which workspace and coach the new file belongs to. It must be set up like this:
-
-1. **Credential (required)**  
-   - In the node, open the **Credential to connect with** dropdown.  
-   - Select (or create) an **HTTP Header Auth** credential.  
-   - In that credential set:
-     - **Name:** e.g. `ClearPath secret`
-     - **Header Name:** `X-Clearpath-Secret`
-     - **Header Value:** the **exact same** value as `N8N_CALLBACK_SECRET` in your ClearPath app (`.env.local` or Vercel).  
-   - Without this header, the API returns 401 Unauthorized.
-
-2. **URL (no change needed)**  
-   - The node builds the URL from:
-     - Base: `CLEARPATH_APP_URL` in n8n (if set) or `https://app.clearpath.com`
-     - Path: `/api/videos/resolve-folder?folderId=...`
-     - The `folderId` is taken from the **Watch folder** trigger: when a new file appears, the file’s parent folder ID is `$json.parents[0]`, so the same folder you’re watching is sent to ClearPath.
-
-3. **What the API does**  
-   - ClearPath looks up a workspace whose **Google Drive import folder ID** (set on the Videos page) equals that `folderId`.  
-   - If it finds one, it returns `{ workspaceId, coachId }` and the workflow continues.  
-   - If none match (or folder not set in the app), it returns 404 and the **Folder in app?** node stops the flow so no video is created.
-
-**Summary:** Create one HTTP Header Auth credential with `X-Clearpath-Secret` = your app’s `N8N_CALLBACK_SECRET`, assign it to the Resolve folder node, and make sure the folder ID you set on the ClearPath Videos page is the same as the folder you chose in the **Watch folder** trigger.
-
----
-
-### Flow summary
-
-| Step | What it does |
+| Step | Where it runs |
 |------|----------------|
-| Watch folder | Google Drive trigger: new file in the chosen folder (polls every 1 minute). |
-| Resolve folder | `GET /api/videos/resolve-folder?folderId=...` with `X-Clearpath-Secret`. Gets `workspaceId` and `coachId`; if 404, rest of flow is skipped. |
-| Folder in app? | IF: only continues if ClearPath returned a workspace. |
-| Download | Downloads the Drive file (binary) using your Google credential. |
-| Convert to MP4 | CloudConvert: converts the file to MP4 (any video format in → MP4 out). |
-| Upload | Cloudinary: uploads the MP4; you get `secure_url`, `duration`, `bytes`. |
-| Add to site | `POST /api/videos/from-n8n` with `workspaceId`, `coachId`, `title`, `playbackUrl`, and optional metadata. |
+| New file in Google Drive folder | **n8n** (tiny JSON only — **no video in n8n memory**) |
+| Turn file into **MP4** (via Drive API URL + token, not a public link) | **CloudConvert** (pulls from Google) |
+| Host for **playback** on your site | **Supabase Storage** (public `videos` bucket) |
+| Save row in video library | **ClearPath** (webhook when conversion finishes) |
+
+**2–5 minute videos:** conversion runs **on ClearPath’s server + CloudConvert**, not inside n8n, so n8n won’t time out or run out of memory.
+
+**The only n8n workflow you need:** `clearpath-drive-folder-video-import.json`  
+(3 nodes: sticky note + Watch Drive + filter videos + one HTTP POST.)
 
 ---
 
-### Testing
+## A) ClearPath app (once per deploy)
 
-1. Set the import folder ID in the ClearPath Videos page and the same folder in the n8n trigger.
-2. Upload a video (e.g. from your phone) into that Drive folder.
-3. Within a few minutes (depending on poll interval), the workflow should run and the video should appear in your ClearPath Videos library.
+### 1. Environment variables (`.env.local` / Vercel)
 
-If the folder isn’t registered in the app, **Resolve folder** returns 404 and the workflow stops without creating a video (no error needed).
+| Variable | Where to get it |
+|----------|------------------|
+| `N8N_CALLBACK_SECRET` | You choose a long random string; **same value** goes into n8n as `CLEARPATH_N8N_SECRET`. |
+| `NEXT_PUBLIC_APP_URL` | Public URL, e.g. `https://your-app.vercel.app` (CloudConvert must reach `/api/webhooks/cloudconvert`). |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials → OAuth 2.0 Client ID (Web). Enable **Google Drive API**. |
+| `GOOGLE_DRIVE_REDIRECT_URI` | Optional. Default: `{NEXT_PUBLIC_APP_URL}/api/integrations/google-drive/callback` — add **exactly** that under the OAuth client’s **Authorized redirect URIs**. |
+| `CLOUDCONVERT_API_KEY` | [CloudConvert → API keys](https://cloudconvert.com/dashboard/api/v2/keys) |
+| `CLOUDINARY_CLOUD_NAME` | [Cloudinary dashboard](https://cloudinary.com/console) |
+| `CLOUDINARY_API_KEY` | Same |
+| `CLOUDINARY_API_SECRET` | Same |
+| `CLOUDCONVERT_WEBHOOK_SECRET` | Optional. If set: CloudConvert **account webhook** URL = `{NEXT_PUBLIC_APP_URL}/api/webhooks/cloudconvert` → copy **signing secret** from CloudConvert. If unset, ClearPath verifies the job via CloudConvert API instead. |
+| `VERCEL_AUTOMATION_BYPASS_SECRET` | **Only if Vercel Deployment Protection is on.** Same value as **Protection Bypass for Automation** in Vercel (see below). Lets CloudConvert hit your webhook URL and lets n8n POST without the login HTML page. |
 
-**"Folder in app?" goes to false:** Run the workflow and check the **Resolve folder** node output. If statusCode is 404/400, the folderId in the URL doesn't match the app — use the exact same ID as on the Videos page. If statusCode is 200 but the IF still fails, the workflow now checks both `body.workspaceId` and `workspaceId`. You can also set the Resolve URL to a fixed value: `https://YOUR-APP-URL/api/videos/resolve-folder?folderId=YOUR_FOLDER_ID_HERE` (same ID as in the app).
+### Vercel “Protection Bypass for Automation” (when you see “Authentication Required” HTML)
+
+1. **Vercel** → your project → **Settings** → **Deployment Protection**.
+2. Find **Protection Bypass for Automation** → **Generate** (or reveal) the secret → **copy it**.
+3. In **Vercel → Environment Variables**, add **`VERCEL_AUTOMATION_BYPASS_SECRET`** = that secret (Production + Preview if needed). **Redeploy.**
+4. ClearPath will append `?x-vercel-protection-bypass=...` to the **CloudConvert webhook URL** automatically.
+5. In **n8n** workflow variables, add **`VERCEL_AUTOMATION_BYPASS_SECRET`** with the **same** value. Node **3** appends **`?x-vercel-protection-bypass=...`** to the request **URL** (Vercel’s recommended approach when headers misbehave). If you turn protection off, clear that variable so the URL has no query param.
+6. **Test** (try **both** — if header fails, use query):
+
+```bash
+# Header
+curl -sS -D - -o /tmp/out -H "x-vercel-protection-bypass: YOUR_SECRET" "https://YOUR_APP.vercel.app/api/videos/import-from-drive"
+# Query
+curl -sS -D - -o /tmp/out "https://YOUR_APP.vercel.app/api/videos/import-from-drive?x-vercel-protection-bypass=YOUR_SECRET"
+```
+
+First line of body should **not** be `<!DOCTYPE`. If **both** still return the login HTML:
+
+- Secret must come from **Deployment Protection → Protection Bypass for Automation** (not a random string).
+- That bypass must be **enabled** for the deployment you’re hitting (check Preview vs Production).
+- URL must match the **protected** deployment exactly (no typo, no wrong branch URL).
+- Redeploy after adding `VERCEL_AUTOMATION_BYPASS_SECRET` on Vercel (for the webhook side).
+
+### 2. Coach — Videos page
+
+1. Paste **Google Drive folder ID** (from `drive.google.com/drive/folders/THIS_PART`) → Save.  
+2. Click **Connect Google Drive** and sign in with the **same Google account** that owns that folder.  
+3. Upload test videos to that folder (MOV/MP4/etc.); they’ll show as **processing** then **ready** with playback.
+
+---
+
+## B) n8n (one workflow)
+
+### 1. Import
+
+**Workflows → ⋮ → Import from file** → `clearpath-drive-folder-video-import.json`
+
+### 2. Workflow variables
+
+Workflow **⋮ → Variables**:
+
+| Name | Value |
+|------|--------|
+| `CLEARPATH_APP_URL` | Same as `NEXT_PUBLIC_APP_URL` (no trailing `/`) |
+| `CLEARPATH_N8N_SECRET` | Same as `N8N_CALLBACK_SECRET` |
+
+*(If `$vars` doesn’t work in your n8n, use instance **Settings → Variables** and change expressions to `$env.CLEARPATH_APP_URL` etc.)*
+
+### 3. Node **1 — Watch Drive folder**
+
+- Credential: **Google Drive OAuth2** (same Google account as the import folder).  
+- **Folder** → by **ID** → same folder ID as on ClearPath Videos.
+
+### 4. Nodes **2** and **3**
+
+Leave as-is (video filter + POST to ClearPath).
+
+### 5. Activate the workflow
+
+---
+
+## Flow in one sentence
+
+**n8n** says “new file X in folder Y” → **ClearPath** starts CloudConvert on a **Drive URL + your stored Google token** → when done, the app **downloads the temporary MP4** and uploads it to **Supabase Storage** → your library stores the **public playback URL**.
+
+---
+
+## Do not use for this goal
+
+- **`clearpath-drive-url-full-nodes.json`** — runs conversion **inside** n8n (sync); bad for 2–5 min (timeouts).
+
+## API (reference)
+
+- `POST /api/videos/import-from-drive` — body: `folderId`, `driveFileId`, `driveFileName`; header `X-Clearpath-Secret`. If Vercel protection is on, add **`?x-vercel-protection-bypass=SECRET`** to the URL **or** header `x-vercel-protection-bypass: SECRET`.
+- `POST /api/webhooks/cloudconvert` — called by CloudConvert only.

@@ -20,6 +20,8 @@ export function VideosPageContent() {
   const [folderIdSaving, setFolderIdSaving] = useState(false)
   const [folderIdSaved, setFolderIdSaved] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
+  const [driveConnected, setDriveConnected] = useState<boolean | null>(null)
+  const [driveEmail, setDriveEmail] = useState<string | null>(null)
   const router = useRouter()
 
   const fetchVideos = useCallback(async () => {
@@ -38,14 +40,41 @@ export function VideosPageContent() {
     if (res.ok) setFolderId(data.folderId ?? '')
   }, [])
 
+  const fetchDriveStatus = useCallback(async () => {
+    const res = await fetch('/api/integrations/google-drive/status', {
+      credentials: 'include',
+      cache: 'no-store',
+    })
+    const data = await res.json()
+    if (res.ok) {
+      setDriveConnected(Boolean(data.connected))
+      setDriveEmail(data.email ?? null)
+    }
+  }, [])
+
   useEffect(() => {
     let mounted = true
     setLoading(true)
-    Promise.all([fetchVideos(), fetchFolderId()]).finally(() => {
+    Promise.all([fetchVideos(), fetchFolderId(), fetchDriveStatus()]).finally(() => {
       if (mounted) setLoading(false)
     })
     return () => { mounted = false }
-  }, [fetchVideos, fetchFolderId])
+  }, [fetchVideos, fetchFolderId, fetchDriveStatus])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('drive_connected') === '1') {
+      setToast('Google Drive connected — folder imports will process on ClearPath servers.')
+      fetchDriveStatus()
+      window.history.replaceState({}, '', '/coach/videos')
+    }
+    const err = q.get('drive_error')
+    if (err) {
+      setToast(err === 'access_denied' ? 'Google sign-in was cancelled.' : `Drive connection: ${err}`)
+      window.history.replaceState({}, '', '/coach/videos')
+    }
+  }, [fetchDriveStatus])
 
   useEffect(() => {
     const supabase = createClient()
@@ -169,6 +198,24 @@ export function VideosPageContent() {
               Import folder set. Upload videos to that folder and they&apos;ll appear here after processing.
             </p>
           )}
+          <div className="mt-4 pt-4 border-t border-[var(--color-border)]">
+            <p className="text-sm font-medium text-[var(--color-ink)] mb-1">Google account (for Drive import)</p>
+            <p className="text-xs text-[var(--color-muted)] mb-2">
+              Connect the <strong>same Google account</strong> you use in n8n for the import folder. ClearPath uses it to let CloudConvert pull files directly — no huge downloads in n8n.
+            </p>
+            {driveConnected ? (
+              <p className="text-sm text-[var(--color-success)]">
+                Connected{driveEmail ? ` (${driveEmail})` : ''}
+              </p>
+            ) : (
+              <a
+                href="/api/integrations/google-drive/start"
+                className="inline-flex items-center justify-center rounded-lg bg-[var(--color-ink)] text-white px-4 py-2 text-sm font-medium min-h-[44px] hover:opacity-90"
+              >
+                Connect Google Drive
+              </a>
+            )}
+          </div>
         </Card>
 
         {error && (

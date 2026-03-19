@@ -20,20 +20,37 @@ export async function GET(request: Request) {
 
   try {
     const supabase = createServiceClient()
-    const { data: workspace, error: wsErr } = await supabase
+
+    let workspaceId: string | null = null
+    const { data: exact, error: wsErr } = await supabase
       .from('workspaces')
-      .select('id')
+      .select('id, google_drive_import_folder_id')
       .eq('google_drive_import_folder_id', folderId)
       .maybeSingle()
 
-    if (wsErr || !workspace) {
+    if (!wsErr && exact?.id) {
+      workspaceId = exact.id
+    } else {
+      // Match after trim (handles spaces/newlines pasted into Supabase or n8n URL)
+      const { data: rows, error: listErr } = await supabase
+        .from('workspaces')
+        .select('id, google_drive_import_folder_id')
+        .not('google_drive_import_folder_id', 'is', null)
+
+      if (!listErr && rows?.length) {
+        const hit = rows.find((w) => (w.google_drive_import_folder_id ?? '').trim() === folderId)
+        if (hit) workspaceId = hit.id
+      }
+    }
+
+    if (!workspaceId) {
       return NextResponse.json({ error: 'Workspace not found for this folder' }, { status: 404 })
     }
 
     const { data: coach, error: coachErr } = await supabase
       .from('coaches')
       .select('user_id')
-      .eq('workspace_id', workspace.id)
+      .eq('workspace_id', workspaceId)
       .limit(1)
       .maybeSingle()
 
@@ -42,7 +59,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
-      workspaceId: workspace.id,
+      workspaceId,
       coachId: coach.user_id,
     })
   } catch {

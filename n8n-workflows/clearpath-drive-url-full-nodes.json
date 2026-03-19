@@ -1,0 +1,477 @@
+{
+  "name": "ClearPath — Drive URL → MP4 → Cloudinary (all in n8n)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Full n8n pipeline (no video binary in n8n)\n\n### Workflow → Variables\n| Variable | Example |\n|----------|---------|\n| GOOGLE_CLIENT_ID | OAuth client ID |\n| GOOGLE_CLIENT_SECRET | OAuth secret |\n| GOOGLE_DRIVE_REFRESH_TOKEN | OAuth Playground → Drive readonly → refresh token |\n| CLOUDCONVERT_API_KEY | cloudconvert.com API key |\n| CLOUDINARY_CLOUD_NAME | |\n| CLOUDINARY_UPLOAD_PRESET | Unsigned **video** preset (fetch URL allowed) |\n| CLEARPATH_APP_URL | https://your-app.com |\n| CLEARPATH_N8N_SECRET | = app N8N_CALLBACK_SECRET |\n\n### Node \"1 — Watch folder\"\nConnect **Google Drive OAuth2**. Paste **folder ID** (same as ClearPath Videos).\n\n### Limits\nUses CloudConvert **sync** API — long videos may **timeout**. For big files use the other workflow (server import).",
+        "height": 640,
+        "width": 460,
+        "color": 5
+      },
+      "id": "note-url",
+      "name": "SETUP — variables + Drive",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-520, 120]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_FOLDER_ID_PASTE_HERE",
+          "mode": "id",
+          "cachedResultName": "Import folder",
+          "cachedResultUrl": "=https://drive.google.com/drive/folders/YOUR_FOLDER_ID_PASTE_HERE"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "gd1",
+      "name": "1 — Watch folder",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [0, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a",
+              "leftValue": "={{ $json.mimeType || '' }}",
+              "rightValue": "video/",
+              "operator": { "type": "string", "operation": "startsWith" }
+            },
+            {
+              "id": "b",
+              "leftValue": "={{ $json.name || '' }}",
+              "rightValue": ".mp4",
+              "operator": { "type": "string", "operation": "endsWith" }
+            },
+            {
+              "id": "c",
+              "leftValue": "={{ $json.name || '' }}",
+              "rightValue": ".mov",
+              "operator": { "type": "string", "operation": "endsWith" }
+            },
+            {
+              "id": "d",
+              "leftValue": "={{ $json.name || '' }}",
+              "rightValue": ".webm",
+              "operator": { "type": "string", "operation": "endsWith" }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "if1",
+      "name": "2 — Video only",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [240, 420]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "fields": {
+          "values": [
+            {
+              "name": "driveFileId",
+              "type": "stringValue",
+              "stringValue": "={{ $json.id }}"
+            },
+            {
+              "name": "folderId",
+              "type": "stringValue",
+              "stringValue": "={{ $json.parents && $json.parents[0] ? $json.parents[0] : '' }}"
+            },
+            {
+              "name": "driveFileName",
+              "type": "stringValue",
+              "stringValue": "={{ $json.name || 'video.mp4' }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "id": "set1",
+      "name": "SaveMeta",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [480, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://oauth2.googleapis.com/token",
+        "authentication": "none",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "grant_type", "value": "refresh_token" },
+            { "name": "refresh_token", "value": "={{ $vars.GOOGLE_DRIVE_REFRESH_TOKEN }}" },
+            { "name": "client_id", "value": "={{ $vars.GOOGLE_CLIENT_ID }}" },
+            { "name": "client_secret", "value": "={{ $vars.GOOGLE_CLIENT_SECRET }}" }
+          ]
+        },
+        "options": {
+          "response": { "response": { "neverError": false, "responseFormat": "json" } },
+          "timeout": 60000
+        }
+      },
+      "id": "http-google",
+      "name": "3 — Google access token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 340]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "fields": {
+          "values": [
+            {
+              "name": "access_token",
+              "type": "stringValue",
+              "stringValue": "={{ $json.access_token }}"
+            },
+            {
+              "name": "driveFileId",
+              "type": "stringValue",
+              "stringValue": "={{ $('SaveMeta').first().json.driveFileId }}"
+            },
+            {
+              "name": "folderId",
+              "type": "stringValue",
+              "stringValue": "={{ $('SaveMeta').first().json.folderId }}"
+            },
+            {
+              "name": "driveFileName",
+              "type": "stringValue",
+              "stringValue": "={{ $('SaveMeta').first().json.driveFileName }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "id": "set2",
+      "name": "MergeToken",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [960, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sync.api.cloudconvert.com/v2/jobs",
+        "authentication": "none",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $vars.CLOUDCONVERT_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tasks: { import_drive: { operation: 'import/url', url: 'https://www.googleapis.com/drive/v3/files/' + $json.driveFileId + '?alt=media', filename: String($json.driveFileName || 'video.mp4').replace(/[^a-zA-Z0-9._-]/g,'_').substring(0,200), headers: { Authorization: 'Bearer ' + $json.access_token } }, to_mp4: { operation: 'convert', input: 'import_drive', output_format: 'mp4' }, out_url: { operation: 'export/url', input: 'to_mp4' } } }) }}",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } },
+          "timeout": 600000
+        }
+      },
+      "id": "http-cc",
+      "name": "4 — CloudConvert sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 340]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "fields": {
+          "values": [
+            {
+              "name": "mp4Url",
+              "type": "stringValue",
+              "stringValue": "={{ ($json.data && $json.data.tasks ? $json.data.tasks : []).filter(function(t){ return t.operation === 'export/url' && t.status === 'finished'; })[0]?.result?.files?.[0]?.url || '' }}"
+            },
+            {
+              "name": "folderId",
+              "type": "stringValue",
+              "stringValue": "={{ $('MergeToken').first().json.folderId }}"
+            },
+            {
+              "name": "driveFileName",
+              "type": "stringValue",
+              "stringValue": "={{ $('MergeToken').first().json.driveFileName }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "id": "set3",
+      "name": "PickMp4",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [1440, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.cloudinary.com/v1_1/' + $vars.CLOUDINARY_CLOUD_NAME + '/video/upload' }}",
+        "authentication": "none",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "file", "value": "={{ $json.mp4Url }}" },
+            { "name": "upload_preset", "value": "={{ $vars.CLOUDINARY_UPLOAD_PRESET }}" }
+          ]
+        },
+        "options": {
+          "response": { "response": { "responseFormat": "json" } },
+          "timeout": 300000
+        }
+      },
+      "id": "http-cl",
+      "name": "5 — Cloudinary from URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 340]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "fields": {
+          "values": [
+            {
+              "name": "playbackUrl",
+              "type": "stringValue",
+              "stringValue": "={{ $json.secure_url }}"
+            },
+            {
+              "name": "thumbnailUrl",
+              "type": "stringValue",
+              "stringValue": "={{ $json.secure_url && String($json.secure_url).includes('/upload/') ? String($json.secure_url).split('/upload/').join('/upload/so_0/') : $json.secure_url }}"
+            },
+            {
+              "name": "title",
+              "type": "stringValue",
+              "stringValue": "={{ String($('PickMp4').item.json.driveFileName || 'video').replace(/\\.(mp4|mov|webm|mkv|avi|m4v)$/i,'') }}"
+            },
+            {
+              "name": "folderId",
+              "type": "stringValue",
+              "stringValue": "={{ $('PickMp4').item.json.folderId }}"
+            },
+            {
+              "name": "durationSeconds",
+              "type": "numberValue",
+              "numberValue": "={{ $json.duration != null ? Math.round($json.duration) : '' }}"
+            },
+            {
+              "name": "fileSizeBytes",
+              "type": "numberValue",
+              "numberValue": "={{ $json.bytes != null ? $json.bytes : '' }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "id": "set4",
+      "name": "ForClearPath",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [1920, 340]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($vars.CLEARPATH_APP_URL || '').replace(/\\/+$/,'') + '/api/videos/resolve-folder?folderId=' + encodeURIComponent($json.folderId) }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Clearpath-Secret",
+              "value": "={{ $vars.CLEARPATH_N8N_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "response": { "response": { "responseFormat": "json" } },
+          "timeout": 60000
+        }
+      },
+      "id": "http-res",
+      "name": "6 — Resolve workspace",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 340]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "fields": {
+          "values": [
+            {
+              "name": "workspaceId",
+              "type": "stringValue",
+              "stringValue": "={{ $json.workspaceId }}"
+            },
+            {
+              "name": "coachId",
+              "type": "stringValue",
+              "stringValue": "={{ $json.coachId }}"
+            },
+            {
+              "name": "title",
+              "type": "stringValue",
+              "stringValue": "={{ $('ForClearPath').first().json.title }}"
+            },
+            {
+              "name": "playbackUrl",
+              "type": "stringValue",
+              "stringValue": "={{ $('ForClearPath').first().json.playbackUrl }}"
+            },
+            {
+              "name": "thumbnailUrl",
+              "type": "stringValue",
+              "stringValue": "={{ $('ForClearPath').first().json.thumbnailUrl }}"
+            },
+            {
+              "name": "durationSeconds",
+              "type": "stringValue",
+              "stringValue": "={{ $('ForClearPath').first().json.durationSeconds }}"
+            },
+            {
+              "name": "fileSizeBytes",
+              "type": "stringValue",
+              "stringValue": "={{ $('ForClearPath').first().json.fileSizeBytes }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "id": "set5",
+      "name": "Build JSON body",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [2400, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($vars.CLEARPATH_APP_URL || '').replace(/\\/+$/,'') + '/api/videos/from-n8n' }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Clearpath-Secret", "value": "={{ $vars.CLEARPATH_N8N_SECRET }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workspaceId: $json.workspaceId, coachId: $json.coachId, title: $json.title, playbackUrl: $json.playbackUrl, thumbnailUrl: $json.thumbnailUrl || null, durationSeconds: $json.durationSeconds === '' || $json.durationSeconds == null ? null : Number($json.durationSeconds), fileSizeBytes: $json.fileSizeBytes === '' || $json.fileSizeBytes == null ? null : Number($json.fileSizeBytes) }) }}",
+        "options": {
+          "response": { "response": { "neverError": true, "responseFormat": "json" } },
+          "timeout": 60000
+        }
+      },
+      "id": "http-fin",
+      "name": "7 — POST from-n8n",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 340]
+    }
+  ],
+  "connections": {
+    "1 — Watch folder": {
+      "main": [[{ "node": "2 — Video only", "type": "main", "index": 0 }]]
+    },
+    "2 — Video only": {
+      "main": [
+        [{ "node": "SaveMeta", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "SaveMeta": {
+      "main": [[{ "node": "3 — Google access token", "type": "main", "index": 0 }]]
+    },
+    "3 — Google access token": {
+      "main": [[{ "node": "MergeToken", "type": "main", "index": 0 }]]
+    },
+    "MergeToken": {
+      "main": [[{ "node": "4 — CloudConvert sync", "type": "main", "index": 0 }]]
+    },
+    "4 — CloudConvert sync": {
+      "main": [[{ "node": "PickMp4", "type": "main", "index": 0 }]]
+    },
+    "PickMp4": {
+      "main": [[{ "node": "5 — Cloudinary from URL", "type": "main", "index": 0 }]]
+    },
+    "5 — Cloudinary from URL": {
+      "main": [[{ "node": "ForClearPath", "type": "main", "index": 0 }]]
+    },
+    "ForClearPath": {
+      "main": [[{ "node": "6 — Resolve workspace", "type": "main", "index": 0 }]]
+    },
+    "6 — Resolve workspace": {
+      "main": [[{ "node": "Build JSON body", "type": "main", "index": 0 }]]
+    },
+    "Build JSON body": {
+      "main": [[{ "node": "7 — POST from-n8n", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "meta": { "templateCredsSetupCompleted": false }
+}
